@@ -8,6 +8,8 @@ import qs.Modals.DLauncherV2
 import qs.Modals.DLauncherV2.Components
 import qs.Modules.Plugins
 import qs.Services
+import qs.Widgets as Shell
+import "favorites.js" as Favorites
 
 PluginComponent {
     id: root
@@ -16,6 +18,8 @@ PluginComponent {
     // Named like a bar pill's property so `dms ipc call widget status xdgMenu` works.
     property var popoutTarget: null
     property string _lastOutput: ""
+    // Desktop ids, in the user's order; kept in the plugin's own settings.
+    readonly property var favorites: pluginData.favorites ?? []
 
     readonly property real sidebarWidth: 200
     readonly property real pillPadding: (barConfig?.widgetPadding ?? SettingsData.barWidgetPaddingDefault) * (widgetThickness / 30)
@@ -49,14 +53,13 @@ PluginComponent {
             property int appIndex: 0
             property bool appsFocused: false
 
+            readonly property string favoritesId: "#favorites"
             readonly property string query: searchField.text.trim().toLowerCase()
-            readonly property var folders: buildFolders(root.menu)
-            readonly property int folderIndex: Math.max(0, folders.findIndex(f => f.id === folderId))
-            readonly property var folder: folders[folderIndex] ?? null
+            readonly property var menuFolders: buildFolders(root.menu)
             readonly property var allApps: {
                 const seen = new Set();
                 const apps = [];
-                for (const f of folders) {
+                for (const f of menuFolders) {
                     for (const item of f.items) {
                         if (item.type === "app" && !seen.has(item.id)) {
                             seen.add(item.id);
@@ -66,6 +69,20 @@ PluginComponent {
                 }
                 return apps;
             }
+            readonly property var favoriteApps: Favorites.resolve(root.favorites, allApps)
+            readonly property var folders: [
+                {
+                    id: favoritesId,
+                    name: I18n.trFor("xdgMenu", "Favorites"),
+                    icon: "star",
+                    iconType: "material",
+                    depth: 0,
+                    items: favoriteApps
+                }
+            ].concat(menuFolders)
+            readonly property int folderIndex: Math.max(0, folders.findIndex(f => f.id === folderId))
+            readonly property var folder: folders[folderIndex] ?? null
+            readonly property bool inFavorites: !query && folder?.id === favoritesId
             readonly property var items: query ? search(query) : (folder?.items ?? [])
             readonly property bool appsActive: appsFocused || query.length > 0
             // The plugin popout pads its content; cancel that so the margins match the app drawer.
@@ -75,21 +92,26 @@ PluginComponent {
 
             onParentPopoutChanged: root.popoutTarget = parentPopout
             onItemsChanged: {
-                appIndex = 0;
-                Qt.callLater(() => appList.resetScroll());
+                appIndex = Math.max(0, Math.min(appIndex, items.length - 1));
+                if (!inFavorites)
+                    Qt.callLater(() => appList.resetScroll());
             }
-            onAppIndexChanged: appList.revealIndex(appIndex)
+            onQueryChanged: resetView()
+            onFolderIdChanged: resetView()
+            onAppIndexChanged: inFavorites ? revealFavorite(appIndex) : appList.revealIndex(appIndex)
             onFolderIndexChanged: folderList.revealIndex(folderIndex)
 
             Connections {
                 target: panel.parentPopout
                 function onOpened() {
                     searchField.text = "";
-                    panel.folderId = "";
+                    panel.folderId = panel.favoriteApps.length > 0 ? panel.favoritesId : (panel.menuFolders[0]?.id ?? panel.favoritesId);
+                    panel.appIndex = 0;
                     panel.appsFocused = false;
                     root.refresh();
                     folderList.resetScroll();
                     appList.resetScroll();
+                    favoritesView.contentY = 0;
                     Qt.callLater(() => searchField.forceActiveFocus());
                 }
             }
@@ -102,7 +124,8 @@ PluginComponent {
                     const entry = {
                         id: node.id,
                         name: node.name,
-                        icon: node.icon,
+                        icon: node.icon || "folder",
+                        iconType: node.icon ? "image" : "material",
                         depth: depth,
                         items: []
                     };
@@ -177,8 +200,54 @@ PluginComponent {
                 root.closePopout();
             }
 
+            function resetView() {
+                appIndex = 0;
+                favoritesView.contentY = 0;
+            }
+
+            function revealFavorite(index) {
+                const row = favoritesList.itemAt(index);
+                if (!row)
+                    return;
+                const top = Math.min(favoritesView.contentY, row.y);
+                favoritesView.contentY = Math.max(top, row.y + row.height - favoritesView.height);
+            }
+
+            function showMenu(item, sceneX, sceneY) {
+                const popout = parentPopout;
+                const body = popout?.contentLoader?.item;
+                if (item?.type !== "app" || !body)
+                    return;
+                const pos = body.mapFromItem(null, sceneX, sceneY);
+                appMenu.app = item;
+                appMenu.open(popout.screen, popout.renderedAlignedX + pos.x + Theme.spacingXS, popout.renderedAlignedY + pos.y + Theme.spacingXS, false);
+            }
+
             Controller {
                 id: launcher
+            }
+
+            Shell.DContextMenu {
+                id: appMenu
+
+                property var app: null
+                readonly property bool isFavorite: Favorites.contains(root.favorites, app?.id)
+
+                layerNamespace: "dms:plugins:xdgMenu:context-menu"
+                keyboardNavigable: true
+                transientSurfaceTracker: panel.parentPopout?.transientSurfaceTracker ?? null
+                menuItems: [
+                    {
+                        type: "item",
+                        icon: isFavorite ? "remove" : "star",
+                        text: isFavorite ? I18n.trFor("xdgMenu", "Remove from Favorites") : I18n.trFor("xdgMenu", "Add to Favorites"),
+                        action: () => root.saveFavorites(Favorites.toggle(root.favorites, appMenu.app.id))
+                    }
+                ]
+                onRenderActiveChanged: {
+                    if (!renderActive)
+                        Qt.callLater(() => searchField.forceActiveFocus());
+                }
             }
 
             Keys.onPressed: event => {
@@ -245,8 +314,9 @@ PluginComponent {
                     height: Theme.menuItemHeight
                     focusPolicy: Qt.NoFocus
                     isSelected: ListView.isCurrentItem && !panel.query
-                    firstInGroup: index === 0
-                    lastInGroup: index === ListView.view.count - 1
+                    // Favorites form a group of their own above the menu folders.
+                    firstInGroup: index <= 1
+                    lastInGroup: index === 0 || index === ListView.view.count - 1
                     onClicked: {
                         panel.showFolder(modelData.id);
                         panel.appsFocused = false;
@@ -260,7 +330,7 @@ PluginComponent {
                         width: Theme.iconSize
                         height: Theme.iconSize
                         iconSize: Theme.iconSize
-                        iconValue: folderRow.modelData.icon || "material:folder"
+                        iconValue: folderRow.modelData.iconType === "material" ? "material:" + folderRow.modelData.icon : folderRow.modelData.icon
                         iconColor: folderRow.contentColor
                         materialIconSizeAdjustment: 0
                         fallbackText: folderRow.modelData.name.charAt(0).toUpperCase()
@@ -296,8 +366,8 @@ PluginComponent {
                     icon: "search"
                 } : {
                     title: panel.folder?.name ?? "",
-                    icon: panel.folder?.icon || "folder",
-                    iconType: panel.folder?.icon ? "image" : "material"
+                    icon: panel.folder?.icon ?? "folder",
+                    iconType: panel.folder?.iconType ?? "material"
                 }
             }
 
@@ -309,6 +379,7 @@ PluginComponent {
                 anchors.bottom: parent.bottom
                 anchors.topMargin: LauncherMetrics.resultsGap
                 anchors.bottomMargin: panel.inset
+                visible: !panel.inFavorites
                 clip: true
                 highlightSelection: panel.appsActive
                 currentIndex: panel.appIndex
@@ -327,6 +398,76 @@ PluginComponent {
                     firstInGroup: index === 0
                     lastInGroup: index === ListView.view.count - 1
                     onClicked: panel.activate(modelData)
+                    onRightClicked: (x, y) => panel.showMenu(modelData, x, y)
+                }
+            }
+
+            // Favorites can be dragged into a new order; dropping a row saves it.
+            DFlickable {
+                id: favoritesView
+                anchors.fill: appList
+                visible: panel.inFavorites
+                clip: true
+                contentHeight: favoritesList.height
+
+                DReorderList {
+                    id: favoritesList
+                    width: favoritesView.width
+                    flickable: favoritesView
+                    spacing: LauncherMetrics.rowGap
+                    model: panel.inFavorites ? panel.items : []
+                    onReordered: order => root.saveFavorites(Favorites.reorder(root.favorites, panel.items.map(app => app.id), order))
+
+                    delegate: LauncherRow {
+                        id: favoriteRow
+                        required property var modelData
+                        required property int index
+                        readonly property bool dragging: favoritesList.draggingIndex === index
+                        readonly property int slot: favoritesList.order.indexOf(index)
+
+                        z: dragging ? 1 : 0
+                        focusPolicy: Qt.NoFocus
+                        item: modelData
+                        isSelected: dragging || (panel.appsActive && index === panel.appIndex)
+                        firstInGroup: dragging || slot === 0
+                        lastInGroup: dragging || slot === favoritesList.count - 1
+                        onClicked: panel.activate(modelData)
+                        onRightClicked: (x, y) => panel.showMenu(modelData, x, y)
+
+                        Behavior on y {
+                            enabled: favoritesList.animateLayout && !favoriteRow.dragging && !SettingsData.reduceMotion
+                            NumberAnimation {
+                                duration: Theme.shortDuration
+                                easing.type: Theme.standardEasing
+                            }
+                        }
+
+                        DragHandler {
+                            target: null
+                            xAxis.enabled: false
+                            enabled: favoritesList.count > 1
+                            cursorShape: Qt.ClosedHandCursor
+                            onGrabChanged: (transition, point) => {
+                                switch (transition) {
+                                case PointerDevice.GrabExclusive:
+                                    favoritesList.begin(favoriteRow.index, favoritesList.mapFromItem(null, point.scenePressPosition.x, point.scenePressPosition.y));
+                                    favoritesList.dragTo(favoritesList.mapFromItem(null, point.scenePosition.x, point.scenePosition.y));
+                                    break;
+                                case PointerDevice.UngrabExclusive:
+                                    if (favoriteRow.dragging)
+                                        favoritesList.finish();
+                                    break;
+                                case PointerDevice.CancelGrabExclusive:
+                                    favoritesList.cancel();
+                                    break;
+                                }
+                            }
+                            onCentroidChanged: {
+                                if (active && favoriteRow.dragging)
+                                    favoritesList.dragTo(favoritesList.mapFromItem(null, centroid.scenePosition.x, centroid.scenePosition.y));
+                            }
+                        }
+                    }
                 }
             }
 
@@ -337,14 +478,14 @@ PluginComponent {
 
                 DIcon {
                     anchors.horizontalCenter: parent.horizontalCenter
-                    name: "search_off"
+                    name: panel.inFavorites ? "star" : "search_off"
                     size: LauncherMetrics.gridIconSize
                     color: Theme.outlineButton
                 }
 
                 StyledText {
                     anchors.horizontalCenter: parent.horizontalCenter
-                    text: I18n.tr("No apps found")
+                    text: panel.inFavorites ? I18n.trFor("xdgMenu", "Right-click an app to add it to Favorites") : I18n.tr("No apps found")
                     font.pixelSize: Theme.fontSizeMedium
                     color: Theme.onSurfaceVariant
                 }
@@ -370,6 +511,10 @@ PluginComponent {
     }
 
     Component.onCompleted: refresh()
+
+    function saveFavorites(ids) {
+        (pluginService ?? PluginService).savePluginData("xdgMenu", "favorites", ids);
+    }
 
     // Every bar instance has this handler; only the first registered one answers.
     IpcHandler {

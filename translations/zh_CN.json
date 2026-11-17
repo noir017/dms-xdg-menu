@@ -1,6 +1,18 @@
 {
+  "Add to Favorites": {
+    "Add to Favorites": "加入常用"
+  },
+  "Favorites": {
+    "Favorites": "常用"
+  },
   "Folder": {
     "Folder": "文件夹"
+  },
+  "Remove from Favorites": {
+    "Remove from Favorites": "从常用移除"
+  },
+  "Right-click an app to add it to Favorites": {
+    "Right-click an app to add it to Favorites": "右键应用加入常用"
   },
   "Search results": {
     "Search results": "搜索结果"
