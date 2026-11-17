@@ -74,7 +74,10 @@ PluginComponent {
             implicitHeight: root.popoutHeight - PopoutMetrics.contentPadding * 2
 
             onParentPopoutChanged: root.popoutTarget = parentPopout
-            onItemsChanged: appIndex = 0
+            onItemsChanged: {
+                appIndex = 0;
+                Qt.callLater(() => appList.resetScroll());
+            }
             onAppIndexChanged: appList.revealIndex(appIndex)
             onFolderIndexChanged: folderList.revealIndex(folderIndex)
 
@@ -85,6 +88,8 @@ PluginComponent {
                     panel.folderId = "";
                     panel.appsFocused = false;
                     root.refresh();
+                    folderList.resetScroll();
+                    appList.resetScroll();
                     Qt.callLater(() => searchField.forceActiveFocus());
                 }
             }
