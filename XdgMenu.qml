@@ -1,6 +1,9 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtCore as QtCore
+import Qt.labs.folderlistmodel
+import Quickshell
 import Quickshell.Io
 import qs.Common
 import qs.DCommon.Widgets
@@ -10,14 +13,26 @@ import qs.Modules.Plugins
 import qs.Services
 import qs.Widgets as Shell
 import "favorites.js" as Favorites
+import "menu.js" as XdgMenu
 
 PluginComponent {
     id: root
 
+    // The parsed menu; parsed again only when a menu file, a watched directory or DMS's app list changes.
     property var menu: null
     // Named like a bar pill's property so `dms ipc call widget status xdgMenu` works.
     property var popoutTarget: null
-    property string _lastOutput: ""
+    property string _menuJson: ""
+    property bool _pending: false
+    // Directory listings and file watchers the parsed menu depends on, by path.
+    property var _listings: ({})
+    property var _watchers: ({})
+    readonly property var _env: {
+        const env = {};
+        for (const name of ["HOME", "XDG_CONFIG_HOME", "XDG_CONFIG_DIRS", "XDG_DATA_HOME", "XDG_DATA_DIRS", "XDG_MENU_PREFIX", "XDG_CURRENT_DESKTOP", "LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"])
+            env[name] = Quickshell.env(name) ?? "";
+        return env;
+    }
     // Desktop ids, in the user's order; kept in the plugin's own settings.
     readonly property var favorites: pluginData.favorites ?? []
 
@@ -108,7 +123,6 @@ PluginComponent {
                     panel.folderId = panel.favoriteApps.length > 0 ? panel.favoritesId : (panel.menuFolders[0]?.id ?? panel.favoritesId);
                     panel.appIndex = 0;
                     panel.appsFocused = false;
-                    root.refresh();
                     folderList.resetScroll();
                     appList.resetScroll();
                     favoritesView.contentY = 0;
@@ -493,24 +507,142 @@ PluginComponent {
         }
     }
 
-    function refresh() {
-        Proc.runCommand(null, ["python3", PluginService.getPluginPath("xdgMenu") + "/xdg-menu.py"], (output, exitCode) => {
-            if (exitCode !== 0) {
-                console.warn("xdgMenu: menu helper exited with code", exitCode);
-                return;
-            }
-            if (output === _lastOutput)
-                return;
-            try {
-                menu = JSON.parse(output);
-                _lastOutput = output;
-            } catch (e) {
-                console.warn("xdgMenu: cannot parse menu helper output:", e);
-            }
-        }, 0, undefined, root);
+    function rebuildMenu() {
+        let result;
+        try {
+            result = XdgMenu.build({
+                env: _env,
+                apps: AppSearchService.applications,
+                fallbackDataDirs: [PluginService.getPluginPath("xdgMenu") + "/data"],
+                read: readFile,
+                list: listDir,
+                executable: name => QtCore.StandardPaths.findExecutable(name).toString() !== "",
+                compare: (a, b) => a.localeCompare(b)
+            });
+        } catch (e) {
+            console.warn("xdgMenu: cannot read the menu:", e);
+            return;
+        }
+        _watchers = keepObjects(_watchers, result.files, path => watcherComponent.createObject(root, {
+                path: path
+            }));
+        _listings = keepObjects(_listings, result.dirs, null);
+        // A listing is still loading; its model triggers the next rebuild.
+        _pending = result.pending;
+        if (_pending)
+            return;
+        for (const warning of result.warnings)
+            console.warn("xdgMenu:", warning);
+        if (result.error) {
+            console.warn("xdgMenu:", result.error);
+            return;
+        }
+        const json = JSON.stringify(result.menu);
+        if (json !== _menuJson) {
+            _menuJson = json;
+            menu = result.menu;
+        }
     }
 
-    Component.onCompleted: refresh()
+    function readFile(path) {
+        reader.failure = 0;
+        reader.path = path;
+        reader.reload();
+        const text = reader.text();
+        return reader.failure === 0 ? text : null;
+    }
+
+    // undefined while the listing loads. A FolderListModel whose folder is missing lists the working
+    // directory instead, so check that the directory exists first.
+    function listDir(dir) {
+        readFile(dir);
+        if (reader.failure !== FileViewError.NotAFile)
+            return null;
+        let model = _listings[dir];
+        if (!model) {
+            model = listingComponent.createObject(root, {
+                folder: "file://" + dir.split("/").map(encodeURIComponent).join("/")
+            });
+            _listings[dir] = model;
+        }
+        if (model.status !== FolderListModel.Ready)
+            return undefined;
+        const entries = [];
+        for (let i = 0; i < model.count; i++) {
+            if (model.get(i, "filePath").startsWith(dir + "/"))
+                entries.push({
+                    name: model.get(i, "fileName"),
+                    dir: model.get(i, "fileIsDir")
+                });
+        }
+        return entries;
+    }
+
+    // Keeps the objects for `paths`, creating missing ones with `create`, and destroys the rest.
+    function keepObjects(objects, paths, create) {
+        const kept = {};
+        for (const path of paths) {
+            const object = objects[path] ?? (create ? create(path) : null);
+            if (object)
+                kept[path] = object;
+        }
+        for (const path in objects) {
+            if (!kept[path])
+                objects[path].destroy();
+        }
+        return kept;
+    }
+
+    Component.onCompleted: rebuildMenu()
+
+    Connections {
+        target: AppSearchService
+        function onApplicationsChanged() {
+            rebuildTimer.restart();
+        }
+    }
+
+    function listingChanged() {
+        if (_pending)
+            Qt.callLater(rebuildMenu);
+        else
+            rebuildTimer.restart();
+    }
+
+    // Changes come in bursts, e.g. a package installing many files; parse once they settle.
+    Timer {
+        id: rebuildTimer
+        interval: 100
+        onTriggered: root.rebuildMenu()
+    }
+
+    FileView {
+        id: reader
+        property int failure: 0
+        preload: false
+        blockAllReads: true
+        printErrors: false
+        onLoadFailed: error => failure = error
+    }
+
+    Component {
+        id: listingComponent
+        FolderListModel {
+            onStatusChanged: root.listingChanged()
+            onCountChanged: root.listingChanged()
+            onDataChanged: root.listingChanged()
+        }
+    }
+
+    Component {
+        id: watcherComponent
+        FileView {
+            preload: false
+            printErrors: false
+            watchChanges: true
+            onFileChanged: rebuildTimer.restart()
+        }
+    }
 
     function saveFavorites(ids) {
         (pluginService ?? PluginService).savePluginData("xdgMenu", "favorites", ids);

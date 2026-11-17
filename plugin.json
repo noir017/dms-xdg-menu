@@ -2,12 +2,11 @@
     "id": "xdgMenu",
     "name": "XDG App Menu",
     "description": "Start menu that groups applications into folders from the freedesktop menu files",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "author": "dms-xdg-menu contributors",
     "type": "widget",
     "capabilities": ["dankbar-widget"],
     "component": "./XdgMenu.qml",
     "icon": "apps",
-    "requires_dms": ">=2.1.0",
-    "requires": ["python3"]
+    "requires_dms": ">=2.1.0"
 }

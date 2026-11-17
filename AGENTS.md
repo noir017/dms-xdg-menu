@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Test: `python3 -m unittest discover -s tests` (needs pyxdg) and `node --test tests/*.test.mjs`
+Test: `node --test tests/*.test.mjs`
 
 Install and reload:
 
@@ -11,3 +11,5 @@ systemctl --user restart dms.service
 ```
 
 Release: bump `version` in plugin.json and push to main; CI tags and publishes.
+
+`menu.js` is plain JavaScript shared by QML and node: no QML APIs, and nothing the QML engine lacks (such as `Array.prototype.flatMap`).
