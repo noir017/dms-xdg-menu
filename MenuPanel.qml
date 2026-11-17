@@ -22,7 +22,16 @@ FocusScope {
     readonly property var folder: folders[folderIndex] ?? null
     readonly property var allApps: {
         const seen = new Set();
-        return folders.flatMap(f => f.items).filter(i => i.type === "app" && !seen.has(i.id) && seen.add(i.id));
+        const apps = [];
+        for (const f of folders) {
+            for (const item of f.items) {
+                if (item.type === "app" && !seen.has(item.id)) {
+                    seen.add(item.id);
+                    apps.push(item);
+                }
+            }
+        }
+        return apps;
     }
     readonly property var items: query ? search(query) : (folder?.items ?? [])
     readonly property bool appsActive: appsFocused || query.length > 0
@@ -181,6 +190,7 @@ FocusScope {
         anchors.topMargin: LauncherMetrics.resultsGap + LauncherMetrics.sectionBand
         anchors.bottomMargin: panel.inset
         width: panel.widget.sidebarWidth - panel.inset - Theme.spacingM
+        clip: true
         highlightSelection: true
         currentIndex: panel.query ? -1 : panel.folderIndex
         spacing: LauncherMetrics.rowGap
@@ -260,6 +270,7 @@ FocusScope {
         anchors.bottom: parent.bottom
         anchors.topMargin: LauncherMetrics.resultsGap
         anchors.bottomMargin: panel.inset
+        clip: true
         highlightSelection: true
         currentIndex: panel.appsActive ? panel.appIndex : -1
         spacing: LauncherMetrics.rowGap
