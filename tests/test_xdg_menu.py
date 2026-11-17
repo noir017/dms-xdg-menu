@@ -130,7 +130,8 @@ class XdgMenuTest(unittest.TestCase):
             "XDG_CURRENT_DESKTOP": desktop,
             "LANG": lang,
         }
-        out = subprocess.run([sys.executable, HELPER], env=env, capture_output=True, text=True, check=True)
+        out = subprocess.run([sys.executable, HELPER], env=env, capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stderr)
         return json.loads(out.stdout)
 
     @staticmethod

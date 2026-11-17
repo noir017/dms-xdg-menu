@@ -9,7 +9,7 @@ Folders come from the freedesktop [menu specification](https://specifications.fr
 ## Requirements
 
 - DMS 2.1 or newer
-- `python3` with [pyxdg](https://pypi.org/project/pyxdg/) (`python3-pyxdg` on Fedora, `python3-xdg` on Debian/Ubuntu, `python-pyxdg` on Arch)
+- `python3` with [pyxdg](https://pypi.org/project/pyxdg/) (`python3-pyxdg` on Fedora, `python3-xdg` on Debian/Ubuntu, `python-pyxdg` on Arch). The pyxdg 0.28 release on PyPI does not work with Python 3.14 or newer; distribution packages that patch it (Fedora's does) are fine.
 
 ## Install
 
