@@ -13,7 +13,8 @@ PluginComponent {
     id: root
 
     property var menu: null
-    property var popout: null
+    // Named like a bar pill's property so `dms ipc call widget status xdgMenu` works.
+    property var popoutTarget: null
     property string _lastOutput: ""
 
     readonly property real sidebarWidth: 200
@@ -72,7 +73,7 @@ PluginComponent {
 
             implicitHeight: root.popoutHeight - PopoutMetrics.contentPadding * 2
 
-            onParentPopoutChanged: root.popout = parentPopout
+            onParentPopoutChanged: root.popoutTarget = parentPopout
             onItemsChanged: appIndex = 0
             onAppIndexChanged: appList.revealIndex(appIndex)
             onFolderIndexChanged: folderList.revealIndex(folderIndex)
@@ -235,7 +236,7 @@ PluginComponent {
                     required property int index
 
                     width: ListView.view.width
-                    height: LauncherMetrics.rowHeight
+                    height: Theme.menuItemHeight
                     focusPolicy: Qt.NoFocus
                     isSelected: ListView.isCurrentItem
                     firstInGroup: index === 0
@@ -375,7 +376,7 @@ PluginComponent {
 
         function open(): void {
             const widget = BarWidgetService.getWidgetOnFocusedScreen(root.pluginId);
-            if (widget && !widget.popout?.shouldBeVisible)
+            if (widget && !widget.popoutTarget?.shouldBeVisible)
                 BarWidgetService.triggerWidgetPopout(root.pluginId);
         }
 
