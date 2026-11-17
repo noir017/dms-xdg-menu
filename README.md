@@ -1,10 +1,10 @@
 # XDG App Menu for DMS
 
-A [DMS](https://github.com/duxlabs-dev/dux-shell) bar widget that opens a categorized start menu, like the KDE or XFCE application menu: folders on the left, applications on the right, search on top.
+A [DMS](https://github.com/duxlabs-dev/dux-shell) bar widget that opens a categorized start menu, like the KDE or XFCE application menu: Favorites and folders on the left, applications on the right, search on top.
 
 Folders come from the freedesktop [menu specification](https://specifications.freedesktop.org/menu-spec/latest/), not from a fixed category list. Programs that install their own `.menu` file (Waydroid, Wine, ...) get their own folder, nested menus become nested folders, and `NoDisplay`, `Hidden`, `OnlyShowIn`/`NotShowIn` and `TryExec` are honored. The menu is re-read every time the panel opens.
 
-中文简介：DMS 顶栏插件「分类开始菜单」。按 XDG 菜单规范把应用分进文件夹（左侧文件夹、右侧应用、顶部搜索），Waydroid、Wine 这类自带 `.menu` 的程序自成文件夹，支持嵌套；界面沿用 DMS 应用抽屉的组件和动态主题，启动应用走 DMS 启动器同一套方法。
+中文简介：DMS 顶栏插件「分类开始菜单」。按 XDG 菜单规范把应用分进文件夹（左侧常用和文件夹、右侧应用、顶部搜索），Waydroid、Wine 这类自带 `.menu` 的程序自成文件夹，支持嵌套；右键应用可加入常用，常用里拖动排序；界面沿用 DMS 应用抽屉的组件和动态主题，启动应用走 DMS 启动器同一套方法。
 
 ## Requirements
 
@@ -13,13 +13,35 @@ Folders come from the freedesktop [menu specification](https://specifications.fr
 
 ## Install
 
+From the latest release:
+
 ```sh
-git clone <this repo> dms-xdg-menu && cd dms-xdg-menu
-rsync -a --exclude '.*' --exclude tests --exclude '*.md' ./ ~/.config/dms/plugins/xdgMenu/
+curl -LO https://github.com/noir017/dms-xdg-menu/releases/latest/download/xdgMenu.zip
+rm -rf ~/.config/dms/plugins/xdgMenu
+unzip xdgMenu.zip -d ~/.config/dms/plugins/
 dms ipc call plugins enable xdgMenu
 ```
 
-Then add **XDG App Menu** to a bar in Settings. It can replace the built-in launcher button.
+From source:
+
+```sh
+git clone https://github.com/noir017/dms-xdg-menu.git && cd dms-xdg-menu
+scripts/package.sh
+rm -rf ~/.config/dms/plugins/xdgMenu
+unzip dist/xdgMenu.zip -d ~/.config/dms/plugins/
+dms ipc call plugins enable xdgMenu
+```
+
+Then add **XDG App Menu** to a bar in Settings. It can replace the built-in launcher button. To upgrade, repeat the same steps and restart DMS (`systemctl --user restart dms.service`).
+
+## Favorites
+
+Favorites sit at the top of the folder list, and the panel opens on them when there are any.
+
+- Right-click an application in any folder or in the search results and choose **Add to Favorites** or **Remove from Favorites**.
+- Drag a favorite up or down to reorder; the order is saved when you drop it.
+
+Favorites are stored by desktop id in the plugin's settings (`~/.config/dms/plugin_settings.json`), so they survive restarts and upgrades. Applications that are no longer installed are not shown.
 
 ## Keyboard and IPC
 
@@ -47,11 +69,14 @@ Mod+Space { spawn "dms" "ipc" "call" "xdgMenu" "toggle"; }
 
 Applications are launched through the DMS launcher, so launch prefix, per-app overrides, "focus running app" and usage history behave the same as in the app drawer.
 
-## Tests
+## Development
 
 ```sh
-python3 -m unittest discover -s tests
+python3 -m unittest discover -s tests   # menu helper and manifest (needs pyxdg)
+node --test tests/*.test.mjs            # favorites logic
 ```
+
+Every push to `main` runs the tests. When the `version` in `plugin.json` has no tag yet, CI tags `v<version>` and publishes a release with `xdgMenu.zip`.
 
 ## License
 

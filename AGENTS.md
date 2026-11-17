@@ -1,10 +1,13 @@
 # AGENTS.md
 
-Test (needs pyxdg): `python3 -m unittest discover -s tests`
+Test: `python3 -m unittest discover -s tests` (needs pyxdg) and `node --test tests/*.test.mjs`
 
 Install and reload:
 
 ```sh
-rsync -a --delete --exclude '.*' --exclude tests --exclude '*.md' ./ ~/.config/dms/plugins/xdgMenu/
-dms ipc call plugins reload xdgMenu
+scripts/package.sh
+rm -rf ~/.config/dms/plugins/xdgMenu && unzip -q dist/xdgMenu.zip -d ~/.config/dms/plugins/
+systemctl --user restart dms.service
 ```
+
+Release: bump `version` in plugin.json and push to main; CI tags and publishes.
