@@ -229,8 +229,9 @@ PluginComponent {
                 anchors.bottomMargin: panel.inset
                 width: root.sidebarWidth - panel.inset - Theme.spacingM
                 clip: true
-                highlightSelection: true
-                currentIndex: panel.query ? -1 : panel.folderIndex
+                // Switch the highlight off rather than using index -1: a new model resets currentIndex to 0.
+                highlightSelection: !panel.query
+                currentIndex: panel.folderIndex
                 spacing: LauncherMetrics.rowGap
                 fadeLength: LauncherMetrics.fadeLength
                 model: panel.folders
@@ -243,7 +244,7 @@ PluginComponent {
                     width: ListView.view.width
                     height: Theme.menuItemHeight
                     focusPolicy: Qt.NoFocus
-                    isSelected: ListView.isCurrentItem
+                    isSelected: ListView.isCurrentItem && !panel.query
                     firstInGroup: index === 0
                     lastInGroup: index === ListView.view.count - 1
                     onClicked: {
@@ -309,8 +310,8 @@ PluginComponent {
                 anchors.topMargin: LauncherMetrics.resultsGap
                 anchors.bottomMargin: panel.inset
                 clip: true
-                highlightSelection: true
-                currentIndex: panel.appsActive ? panel.appIndex : -1
+                highlightSelection: panel.appsActive
+                currentIndex: panel.appIndex
                 spacing: LauncherMetrics.rowGap
                 fadeLength: LauncherMetrics.fadeLength
                 model: panel.items
@@ -322,7 +323,7 @@ PluginComponent {
                     width: ListView.view.width
                     focusPolicy: Qt.NoFocus
                     item: modelData
-                    isSelected: ListView.isCurrentItem
+                    isSelected: ListView.isCurrentItem && panel.appsActive
                     firstInGroup: index === 0
                     lastInGroup: index === ListView.view.count - 1
                     onClicked: panel.activate(modelData)
