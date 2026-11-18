@@ -35,6 +35,12 @@ PluginComponent {
     }
     // Desktop ids, in the user's order; kept in the plugin's own settings.
     readonly property var favorites: pluginData.favorites ?? []
+    // Desktops whose OnlyShowIn apps are shown too, from the settings page: "KDE;GNOME".
+    readonly property var extraDesktops: String(pluginData.extraDesktops ?? "").split(/[;,:\s]+/).filter(name => name)
+    // DMS's own apps (Settings, Notepad, ...) have no desktop file; they get ids of their own.
+    readonly property string builtInPrefix: "dms:"
+
+    onExtraDesktopsChanged: rebuildTimer.restart()
 
     readonly property real sidebarWidth: 200
     readonly property real pillPadding: (barConfig?.widgetPadding ?? SettingsData.barWidgetPaddingDefault) * (widgetThickness / 30)
@@ -179,13 +185,16 @@ PluginComponent {
             function appItem(app) {
                 const override = SessionData.getAppOverride(app.id);
                 const name = override?.name || app.name;
+                const icon = override?.icon || app.icon || "application-x-executable";
                 return {
                     type: "app",
                     id: app.id,
                     name: name,
                     subtitle: override?.comment || app.comment,
-                    icon: override?.icon || app.icon || "application-x-executable",
-                    iconType: "image",
+                    icon: icon,
+                    // DMS draws its own apps as its logo with a symbol in the corner.
+                    iconType: icon.startsWith("svg+corner:") ? "composite" : "image",
+                    iconFull: icon,
                     terms: [app.genericName, app.id].concat(app.keywords).join("\n").toLowerCase(),
                     key: name.toLowerCase()
                 };
@@ -206,6 +215,13 @@ PluginComponent {
                     return;
                 if (item.type === "folder") {
                     showFolder(item.id);
+                    return;
+                }
+                const builtIn = root.builtInApp(item.id);
+                if (builtIn) {
+                    // Close first: these open DMS's own windows and modals, which take the focus.
+                    root.closePopout();
+                    AppSearchService.executeCoreApp(builtIn);
                     return;
                 }
                 launcher.launchApp({
@@ -512,7 +528,8 @@ PluginComponent {
         try {
             result = XdgMenu.build({
                 env: _env,
-                apps: AppSearchService.applications,
+                apps: Array.prototype.slice.call(AppSearchService.applications).concat(builtInApps()),
+                extraDesktops: extraDesktops,
                 fallbackDataDirs: [PluginService.getPluginPath("xdgMenu") + "/data"],
                 read: readFile,
                 list: listDir,
@@ -542,6 +559,26 @@ PluginComponent {
             _menuJson = json;
             menu = result.menu;
         }
+    }
+
+    // The same list DMS's launcher shows; the ones switched off in its settings are not in it.
+    function builtInApps() {
+        return AppSearchService.coreApps.map(app => ({
+                    id: builtInPrefix + app.builtInPluginId,
+                    name: app.name,
+                    genericName: "",
+                    comment: app.comment,
+                    icon: app.icon || "",
+                    keywords: [],
+                    categories: app.categories ?? [],
+                    builtIn: true
+                }));
+    }
+
+    function builtInApp(id) {
+        if (!id.startsWith(builtInPrefix))
+            return null;
+        return AppSearchService.coreApps.find(app => builtInPrefix + app.builtInPluginId === id) ?? null;
     }
 
     function readFile(path) {
@@ -598,6 +635,9 @@ PluginComponent {
     Connections {
         target: AppSearchService
         function onApplicationsChanged() {
+            rebuildTimer.restart();
+        }
+        function onCoreAppsChanged() {
             rebuildTimer.restart();
         }
     }

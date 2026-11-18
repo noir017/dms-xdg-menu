@@ -180,7 +180,7 @@ function dmsApps(files, env) {
     return [...byId.values()].filter(entry => !entry.noDisplay);
 }
 
-function build({ files = fixture(), lang = "zh_CN.UTF-8", desktop = "niri", env = {}, loading, compare } = {}) {
+function build({ files = fixture(), lang = "zh_CN.UTF-8", desktop = "niri", env = {}, loading, compare, builtIn = [], extraDesktops } = {}) {
     const fullEnv = {
         HOME: "/fx/home",
         XDG_CONFIG_HOME: "/fx/home/config",
@@ -193,7 +193,8 @@ function build({ files = fixture(), lang = "zh_CN.UTF-8", desktop = "niri", env 
     };
     return XdgMenu.build({
         env: fullEnv,
-        apps: dmsApps(files, fullEnv),
+        apps: dmsApps(files, fullEnv).concat(builtIn.map(entry => ({ builtIn: true, ...entry }))),
+        extraDesktops,
         fallbackDataDirs: [BUNDLED],
         ...memoryFs(files, loading),
         executable: name => name === "true",
@@ -282,6 +283,62 @@ test("English names", () => {
 
 test("unallocated entries go to Other", () => {
     assert.deepEqual(appIds(folder(menu(), "Other")), ["loose"]);
+});
+
+test("extra desktops show their OnlyShowIn apps without hiding NotShowIn ones", () => {
+    const files = fixture({ "/fx/usr/applications/not-kde.desktop": app("Name=Not KDE\nCategories=Utility;\nNotShowIn=KDE;\n") });
+    const accessories = folder(menu({ files, extraDesktops: ["KDE"] }), "Accessories");
+    assert.deepEqual(appIds(accessories).sort(), ["calc", "has-tryexec", "not-kde", "only-kde", "only-niri"]);
+});
+
+// Like redhat-menus: settings are kept out of applications.menu and live in settings.menu.
+const SETTINGS_MENU = `<Menu><Name>Settings</Name><Directory>Desktop.directory</Directory><DefaultAppDirs/><DefaultDirectoryDirs/><DefaultMergeDirs/>
+  <Menu><Name>Preferences</Name><MergeFile>preferences.menu</MergeFile></Menu>
+  <Menu><Name>Administration</Name><Include><And><Category>Settings</Category><Category>System</Category></And></Include></Menu>
+</Menu>`;
+const PREFERENCES_MENU = "<Menu><Name>Preferences</Name><Include><And><Category>Settings</Category><Not><Category>System</Category></Not></And></Include></Menu>";
+const settingsFiles = (extra = {}) => fixture({
+    "/fx/etc/menus/settings.menu": SETTINGS_MENU,
+    "/fx/etc/menus/preferences.menu": PREFERENCES_MENU,
+    "/fx/usr/applications/input.desktop": app("Name=Input Method\nCategories=Settings;\n"),
+    "/fx/usr/applications/firewall.desktop": app("Name=Firewall\nCategories=System;Settings;\n"),
+    "/fx/usr/desktop-directories/Desktop.directory": directory("Name=System\nName[zh_CN]=系统\nIcon=preferences-desktop\n"),
+    ...extra,
+});
+
+test("settings.menu is one more folder, with its merged files", () => {
+    const root = menu({ files: settingsFiles() });
+    const settings = folder(root, "Settings");
+    assert.equal(settings.name, "系统");
+    assert.deepEqual(appIds(folder(settings, "Preferences")), ["input"]);
+    assert.deepEqual(appIds(folder(settings, "Administration")), ["firewall"]);
+    // Placed in settings, so not in Other; applications-merged is not merged a second time.
+    assert.deepEqual(appIds(folder(root, "Other")), ["loose"]);
+    assert.deepEqual(appIds(folder(root, "Droid")), ["droid.maps"]);
+    assert.ok(!folderIds(settings).includes("Settings/Droid"));
+});
+
+test("without settings.menu, settings apps go to Other rather than nowhere", () => {
+    const root = menu({ files: settingsFiles({ "/fx/etc/menus/settings.menu": null }) });
+    assert.ok(!folderIds(root).includes("Settings"));
+    assert.deepEqual(appIds(folder(root, "Other")).sort(), ["firewall", "input", "loose"]);
+});
+
+test("an app in no folder goes to Other, made when the menu has none; an Exclude keeps it out", () => {
+    const files = fixture({
+        "/fx/etc/menus/applications.menu": ROOT_MENU.replace(/<Menu>\s*<Name>Other<\/Name>[\s\S]*?<\/Menu>/, ""),
+        "/fx/home/config/menus/applications-merged/user.menu": "<Menu><Name>Applications</Name><Menu><Name>Games</Name><Exclude><Filename>chess.desktop</Filename></Exclude></Menu></Menu>",
+    });
+    const other = folder(menu({ files }), "Other");
+    assert.equal(other.name, "其他");
+    assert.deepEqual(appIds(other), ["loose"]);
+});
+
+test("built-in apps have no desktop file and are placed by their categories", () => {
+    const root = menu({ builtIn: [{ id: "dms:notes", name: "Notes", icon: "svg+corner:/logo.svg|description", categories: ["Office", "Utility"] }] });
+    const notes = findApp(folder(root, "Accessories"), "dms:notes");
+    assert.equal(notes.icon, "svg+corner:/logo.svg|description");
+    assert.ok(!appIds(folder(root, "Other")).includes("dms:notes"));
 });
 
 // ---------- Menu rules

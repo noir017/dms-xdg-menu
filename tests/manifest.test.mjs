@@ -13,6 +13,7 @@ test("plugin.json", () => {
     assert.equal(manifest.id, "xdgMenu");
     assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
     assert.ok(existsSync(new URL(manifest.component, root)));
+    assert.ok(existsSync(new URL(manifest.settings, root)));
 });
 
 test("translations are non-empty strings", () => {
@@ -26,8 +27,8 @@ test("translations are non-empty strings", () => {
     }
 });
 
-test("translations cover exactly the terms the widget uses", () => {
-    const qml = readFileSync(new URL("XdgMenu.qml", root), "utf8");
+test("translations cover exactly the terms the widget and its settings use", () => {
+    const qml = readdirSync(root).filter(name => name.endsWith(".qml")).map(name => readFileSync(new URL(name, root), "utf8")).join("\n");
     const used = new Set([...qml.matchAll(/I18n\.trFor\("xdgMenu", "([^"]+)"\)/g)].map(match => match[1]));
     for (const name of translations)
         assert.deepEqual(new Set(Object.keys(load(`translations/${name}`))), used, name);

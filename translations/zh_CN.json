@@ -2,6 +2,12 @@
   "Add to Favorites": {
     "Add to Favorites": "加入常用"
   },
+  "Also show apps for these desktops": {
+    "Also show apps for these desktops": "额外显示这些桌面的应用"
+  },
+  "Apps made only for another desktop are hidden unless it is listed here. Separate names with semicolons.": {
+    "Apps made only for another desktop are hidden unless it is listed here. Separate names with semicolons.": "只给其它桌面用的应用默认隐藏，在这里列出该桌面即可显示，多个用分号分隔，如 KDE;GNOME。"
+  },
   "Favorites": {
     "Favorites": "常用"
   },

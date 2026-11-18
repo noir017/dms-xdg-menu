@@ -3,9 +3,12 @@
 // Freedesktop application menu (https://specifications.freedesktop.org/menu-spec/latest/).
 // Plain JavaScript shared by the widget and the node tests: all file access goes through callbacks.
 //
-// build(options) reads ${XDG_MENU_PREFIX}applications.menu and sorts DMS's applications into it.
+// build(options) reads ${XDG_MENU_PREFIX}applications.menu, plus ${XDG_MENU_PREFIX}settings.menu as one
+// more folder when the system has it, and sorts DMS's applications into them.
 //   env              environment variables: HOME, XDG_*, LANGUAGE, LC_ALL, LC_MESSAGES, LANG
-//   apps             DMS's desktop entries: {id, name, genericName, comment, icon, keywords, categories}
+//   apps             DMS's desktop entries: {id, name, genericName, comment, icon, keywords, categories};
+//                    builtIn: true marks an app with no desktop file (DMS's own), placed by its categories
+//   extraDesktops    desktops whose OnlyShowIn apps are shown too, as if they were current
 //   fallbackDataDirs data dirs searched last for .directory files
 //   read(path)       file text, or null when there is no such file
 //   list(dir)        [{name, dir}], null when there is no such directory, undefined while still loading
@@ -20,6 +23,7 @@ function build(options) {
     const root = loadMenus(ctx);
     let menu = null;
     if (root) {
+        addSettingsMenu(ctx, root);
         handleMoves(root);
         removeDeleted(root);
         resolveMenu(root, [], []);
@@ -53,6 +57,7 @@ function context(options) {
         fallbackDataDirs: (options.fallbackDataDirs || []).map(normalize),
         prefix: env.XDG_MENU_PREFIX || "",
         desktops: (env.XDG_CURRENT_DESKTOP || "").split(":").filter(name => name),
+        extraDesktops: toArray(options.extraDesktops).map(String),
         langs: languages(env),
         apps: toArray(options.apps),
         executable: options.executable || (() => true),
@@ -281,7 +286,9 @@ function splitList(value) {
 }
 
 // OnlyShowIn/NotShowIn: the first desktop of XDG_CURRENT_DESKTOP that either list names decides.
-function shownIn(entry, desktops) {
+// The extra desktops only widen OnlyShowIn: listing KDE must not hide the apps that say NotShowIn=KDE
+// because KDE has its own (fcitx5-configtool, kdesystemsettings).
+function shownIn(entry, desktops, extraDesktops) {
     const only = splitList(entry.OnlyShowIn || "");
     const not = splitList(entry.NotShowIn || "");
     for (const desktop of desktops) {
@@ -290,7 +297,7 @@ function shownIn(entry, desktops) {
         if (not.indexOf(desktop) >= 0)
             return false;
     }
-    return only.length === 0;
+    return only.length === 0 || only.some(desktop => extraDesktops.indexOf(desktop) >= 0);
 }
 
 // ---------- Loading and merging menu files
@@ -335,6 +342,38 @@ function loadMenus(ctx) {
     }
     ctx.error = "no " + names[0] + " in " + ctx.configDirs.map(dir => dir + "/menus").join(", ");
     return null;
+}
+
+// GNOME-lineage menus (gnome-menus, redhat-menus, MATE) keep settings out of applications.menu, in a
+// settings.menu of their own: Preferences, Administration. Without it those apps are in no folder.
+// It becomes one more folder; a file applications.menu already merged is not read twice.
+function addSettingsMenu(ctx, root) {
+    const names = [ctx.prefix + "settings.menu"];
+    if (ctx.prefix)
+        names.push("settings.menu");
+    for (const name of names) {
+        for (const dir of ctx.configDirs) {
+            const path = dir + "/menus/" + name;
+            ctx.files[path] = true;
+            if (ctx.merged[path])
+                return;
+            const text = ctx.read(path);
+            if (text === null)
+                continue;
+            ctx.merged[path] = true;
+            const menu = newMenu("");
+            try {
+                parseMenu(ctx, menuElement(text), path, menu, false);
+            } catch (e) {
+                ctx.warnings.push("skipped " + path + ": " + e.message);
+                return;
+            }
+            addSubmenu(root, menu.name ? menu : Object.assign(menu, {
+                name: "Settings"
+            }));
+            return;
+        }
+    }
 }
 
 function menuElement(text) {
@@ -619,6 +658,8 @@ function indexApps(ctx, root) {
             id: id,
             entry: entry,
             categories: toArray(entry.categories).map(String),
+            // With no desktop file, it belongs to every application dir.
+            anyDir: entry.builtIn === true,
             dirs: found,
             path: home ? found[home] : null,
             shown: undefined
@@ -640,14 +681,18 @@ function scanApps(ctx, root, dir, prefix, files, depth) {
 }
 
 // Two passes: regular menus first; <OnlyUnallocated> menus then get what no <Include> matched.
+// Last, what landed in no menu goes to Other, so the menu lists everything DMS's launcher does; only an
+// <Exclude> that matched (how menu editors hide an app) keeps an app out.
 function allocate(root, apps) {
     const matched = {};
+    const excluded = {};
+    const placed = {};
     const pass = (menu, unallocated) => {
         for (const submenu of menu.submenus)
             pass(submenu, unallocated);
         if ((menu.onlyUnallocated === true) !== unallocated)
             return;
-        const pool = apps.filter(app => menu.appDirs.some(dir => app.dirs[dir]) && !(unallocated && matched[app.id]));
+        const pool = apps.filter(app => (app.anyDir || menu.appDirs.some(dir => app.dirs[dir])) && !(unallocated && matched[app.id]));
         menu.entries = pool.filter(app => {
             let included = false;
             for (const rule of menu.rules) {
@@ -655,13 +700,28 @@ function allocate(root, apps) {
                     included = rule.include;
                     if (included && !unallocated)
                         matched[app.id] = true;
+                    if (!included)
+                        excluded[app.id] = true;
                 }
             }
+            if (included)
+                placed[app.id] = true;
             return included;
         });
     };
     pass(root, false);
     pass(root, true);
+    const leftovers = apps.filter(app => !placed[app.id] && !excluded[app.id]);
+    if (leftovers.length === 0)
+        return;
+    let other = findMenu(root, "Other");
+    if (!other) {
+        other = addSubmenu(root, newMenu("Other"));
+        other.directories = ["X-GNOME-Other.directory"];
+        other.appDirs = root.appDirs;
+        other.directoryDirs = root.directoryDirs;
+    }
+    other.entries = other.entries.concat(leftovers);
 }
 
 // NoDisplay and Hidden apps are not in DMS's list; OnlyShowIn, NotShowIn and TryExec need the file.
@@ -669,7 +729,7 @@ function isShown(ctx, app) {
     if (app.shown === undefined) {
         const text = app.path ? ctx.read(app.path) : null;
         const entry = text === null ? null : parseShownKeys(text);
-        app.shown = !entry || (shownIn(entry, ctx.desktops) && (!entry.TryExec || ctx.executable(entry.TryExec)));
+        app.shown = !entry || (shownIn(entry, ctx.desktops, ctx.extraDesktops) && (!entry.TryExec || ctx.executable(entry.TryExec)));
     }
     return app.shown;
 }
