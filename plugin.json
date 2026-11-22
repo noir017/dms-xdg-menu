@@ -2,7 +2,7 @@
     "id": "xdgMenu",
     "name": "XDG App Menu",
     "description": "Start menu that groups applications into folders from the freedesktop menu files",
-    "version": "1.3.0",
+    "version": "1.4.0",
     "author": "dms-xdg-menu contributors",
     "type": "widget",
     "capabilities": [

@@ -19,4 +19,11 @@ PluginSettings {
         description: I18n.trFor("xdgMenu", "Show a power button next to the search field for screen off, lock, suspend, log out, reboot and power off.")
         defaultValue: true
     }
+
+    ToggleSetting {
+        settingKey: "showRecentApps"
+        label: I18n.trFor("xdgMenu", "Show recent apps")
+        description: I18n.trFor("xdgMenu", "Show a Recent folder below Favorites using DMS's launch history.")
+        defaultValue: true
+    }
 }

@@ -4,7 +4,7 @@ set -eu
 cd "$(dirname "$0")/.."
 rm -rf dist
 mkdir -p dist/xdgMenu
-cp -r plugin.json XdgMenu.qml XdgMenuSettings.qml favorites.js menu.js data translations LICENSE dist/xdgMenu/
+cp -r plugin.json XdgMenu.qml XdgMenuSettings.qml favorites.js menu.js pinyin.js data translations LICENSE dist/xdgMenu/
 cd dist
 zip -qr xdgMenu.zip xdgMenu
 rm -rf xdgMenu

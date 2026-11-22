@@ -4,7 +4,7 @@ A [DMS](https://github.com/duxlabs-dev/dux-shell) bar widget that opens a catego
 
 Folders come from the freedesktop [menu specification](https://specifications.freedesktop.org/menu-spec/latest/), not from a fixed category list. Programs that install their own `.menu` file (Waydroid, Wine, ...) get their own folder, nested menus become nested folders, and `NoDisplay`, `Hidden`, `OnlyShowIn`/`NotShowIn` and `TryExec` are honored. Everything the DMS launcher lists is in a folder, DMS's own Settings, Notepad, System Monitor, Color Picker and QR Generator included. The menu is parsed inside the shell, with no helper process, and parsed again only when a menu file or the installed applications change.
 
-中文简介：DMS 顶栏插件「分类开始菜单」。按 XDG 菜单规范把应用分进文件夹（左侧常用和文件夹、右侧应用、顶部搜索与电源菜单），Waydroid、Wine 这类自带 `.menu` 的程序自成文件夹，支持嵌套；DMS 启动器里有的应用都在（含 DMS 自带的设置、便签等）；右键应用可加入常用，常用里拖动排序；搜索框右侧提供电源二级菜单（关屏、锁定、休眠、注销、重启、关机）；界面沿用 DMS 应用抽屉的组件和动态主题，启动应用走 DMS 启动器同一套方法。
+中文简介：DMS 顶栏插件「分类开始菜单」。按 XDG 菜单规范把应用分进文件夹（左侧常用、最近使用和文件夹，右侧支持列表/网格视图切换，顶部搜索支持中文拼音与首字母及使用频率排序，右侧带电源二级菜单），Waydroid、Wine 这类自带 `.menu` 的程序自成文件夹，支持嵌套；DMS 启动器里有的应用都在（含 DMS 自带的设置、便签等）；右键应用可加入常用、调用 `.desktop` 快捷动作、使用独显启动或隐藏应用，常用列表可拖动排序；界面沿用 DMS 应用抽屉的组件和动态主题。
 
 ## Requirements
 
@@ -47,6 +47,8 @@ Favorites are stored by desktop id in the plugin's settings (`~/.config/dms/plug
 **Also show apps for these desktops**: applications marked `OnlyShowIn` another desktop are hidden, as the specification says. List desktops here, separated by semicolons (`KDE;GNOME`), to show theirs too; `NotShowIn` is still decided by the current desktop only.
 
 **Show power button**: shows a power button next to the search field that opens a menu with Turn off screen, Lock, Suspend, Log out, Reboot and Power off (destructive actions ask for a second click when DMS power confirmation is enabled).
+
+**Show recent apps**: shows a Recent folder below Favorites populated from DMS's application usage history.
 
 ## Keyboard and IPC
 

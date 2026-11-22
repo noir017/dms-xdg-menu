@@ -14,6 +14,7 @@ import qs.Services
 import qs.Widgets as Shell
 import "favorites.js" as Favorites
 import "menu.js" as XdgMenu
+import "pinyin.js" as Pinyin
 
 PluginComponent {
     id: root
@@ -38,6 +39,8 @@ PluginComponent {
     // Desktops whose OnlyShowIn apps are shown too, from the settings page: "KDE;GNOME".
     readonly property var extraDesktops: String(pluginData.extraDesktops ?? "").split(/[;,:\s]+/).filter(name => name)
     readonly property bool showPowerMenu: pluginData.showPowerMenu !== false
+    readonly property bool showRecentApps: pluginData.showRecentApps !== false
+    readonly property string viewMode: pluginData.viewMode === "grid" ? "grid" : "list"
     readonly property bool canPowerOffMonitors: CompositorService.isNiri
         || CompositorService.isHyprland
         || CompositorService.isMango
@@ -85,8 +88,11 @@ PluginComponent {
             property bool appsFocused: false
 
             readonly property string favoritesId: "#favorites"
+            readonly property string recentId: "#recent"
+            readonly property bool isGrid: root.viewMode === "grid"
             readonly property string query: searchField.text.trim().toLowerCase()
             readonly property var menuFolders: buildFolders(root.menu)
+            readonly property var usageRanking: AppUsageHistoryData.appUsageRanking ?? ({})
             readonly property var allApps: {
                 const seen = new Set();
                 const apps = [];
@@ -101,16 +107,44 @@ PluginComponent {
                 return apps;
             }
             readonly property var favoriteApps: Favorites.resolve(root.favorites, allApps)
-            readonly property var folders: [
-                {
-                    id: favoritesId,
-                    name: I18n.trFor("xdgMenu", "Favorites"),
-                    icon: "star",
-                    iconType: "material",
-                    depth: 0,
-                    items: favoriteApps
+            readonly property var recentApps: {
+                const ranking = usageRanking;
+                const list = [];
+                for (const app of allApps) {
+                    const info = ranking[app.id];
+                    if (info && (info.lastUsed ?? 0) > 0)
+                        list.push({
+                            app: app,
+                            lastUsed: info.lastUsed,
+                            usageCount: info.usageCount ?? 0
+                        });
                 }
-            ].concat(menuFolders)
+                list.sort((a, b) => (b.lastUsed - a.lastUsed) || (b.usageCount - a.usageCount) || a.app.name.localeCompare(b.app.name));
+                return list.slice(0, 16).map(entry => entry.app);
+            }
+            readonly property var pinnedFolders: {
+                const out = [
+                    {
+                        id: favoritesId,
+                        name: I18n.trFor("xdgMenu", "Favorites"),
+                        icon: "star",
+                        iconType: "material",
+                        depth: 0,
+                        items: favoriteApps
+                    }
+                ];
+                if (root.showRecentApps && recentApps.length > 0)
+                    out.push({
+                        id: recentId,
+                        name: I18n.trFor("xdgMenu", "Recent"),
+                        icon: "history",
+                        iconType: "material",
+                        depth: 0,
+                        items: recentApps
+                    });
+                return out;
+            }
+            readonly property var folders: pinnedFolders.concat(menuFolders)
             readonly property int folderIndex: Math.max(0, folders.findIndex(f => f.id === folderId))
             readonly property var folder: folders[folderIndex] ?? null
             readonly property bool inFavorites: !query && folder?.id === favoritesId
@@ -124,12 +158,21 @@ PluginComponent {
             onParentPopoutChanged: root.popoutTarget = parentPopout
             onItemsChanged: {
                 appIndex = Math.max(0, Math.min(appIndex, items.length - 1));
-                if (!inFavorites)
+                if (isGrid)
+                    appGrid.contentY = 0;
+                else if (!inFavorites)
                     Qt.callLater(() => appList.resetScroll());
             }
             onQueryChanged: resetView()
             onFolderIdChanged: resetView()
-            onAppIndexChanged: inFavorites ? revealFavorite(appIndex) : appList.revealIndex(appIndex)
+            onAppIndexChanged: {
+                if (isGrid)
+                    appGrid.positionViewAtIndex(appIndex, GridView.Contain);
+                else if (inFavorites)
+                    revealFavorite(appIndex);
+                else
+                    appList.revealIndex(appIndex);
+            }
             onFolderIndexChanged: folderList.revealIndex(folderIndex)
 
             Connections {
@@ -142,6 +185,7 @@ PluginComponent {
                     folderList.resetScroll();
                     appList.resetScroll();
                     favoritesView.contentY = 0;
+                    appGrid.contentY = 0;
                     Qt.callLater(() => searchField.forceActiveFocus());
                 }
             }
@@ -196,6 +240,7 @@ PluginComponent {
                 const override = SessionData.getAppOverride(app.id);
                 const name = override?.name || app.name;
                 const icon = override?.icon || app.icon || "application-x-executable";
+                const py = Pinyin.toPinyin(name);
                 return {
                     type: "app",
                     id: app.id,
@@ -206,13 +251,26 @@ PluginComponent {
                     iconType: icon.startsWith("svg+corner:") ? "composite" : "image",
                     iconFull: icon,
                     terms: [app.genericName, app.id].concat(app.keywords).join("\n").toLowerCase(),
-                    key: name.toLowerCase()
+                    key: name.toLowerCase(),
+                    pinyinFull: py.full,
+                    pinyinInitials: py.initials
                 };
             }
 
             function search(text) {
-                const score = app => app.key.startsWith(text) ? 3 : app.key.includes(text) ? 2 : app.terms.includes(text) ? 1 : 0;
-                return allApps.filter(app => score(app) > 0).sort((a, b) => score(b) - score(a) || a.name.localeCompare(b.name));
+                const ranking = usageRanking;
+                const scored = [];
+                for (const app of allApps) {
+                    const s = Pinyin.matchScore(text, app);
+                    if (s > 0)
+                        scored.push({
+                            app: app,
+                            score: s,
+                            usage: ranking[app.id]?.usageCount ?? 0
+                        });
+                }
+                scored.sort((a, b) => (b.score - a.score) || (b.usage - a.usage) || a.app.name.localeCompare(b.app.name));
+                return scored.map(entry => entry.app);
             }
 
             function showFolder(id) {
@@ -243,6 +301,7 @@ PluginComponent {
             function resetView() {
                 appIndex = 0;
                 favoritesView.contentY = 0;
+                appGrid.contentY = 0;
             }
 
             function revealFavorite(index) {
@@ -314,18 +373,65 @@ PluginComponent {
 
                 property var app: null
                 readonly property bool isFavorite: Favorites.contains(root.favorites, app?.id)
+                readonly property var desktopEntry: root.desktopEntryFor(app?.id)
 
                 layerNamespace: "dms:plugins:xdgMenu:context-menu"
                 keyboardNavigable: true
                 transientSurfaceTracker: panel.parentPopout?.transientSurfaceTracker ?? null
-                menuItems: [
-                    {
+                menuItems: {
+                    const items = [];
+                    if (!app)
+                        return items;
+                    items.push({
                         type: "item",
                         icon: isFavorite ? "remove" : "star",
                         text: isFavorite ? I18n.trFor("xdgMenu", "Remove from Favorites") : I18n.trFor("xdgMenu", "Add to Favorites"),
                         action: () => root.saveFavorites(Favorites.toggle(root.favorites, appMenu.app.id))
+                    });
+                    const entry = desktopEntry;
+                    if (!entry)
+                        return items;
+                    if (entry.actions && entry.actions.length > 0) {
+                        items.push({
+                            type: "separator"
+                        });
+                        for (let i = 0; i < entry.actions.length; i++) {
+                            const act = entry.actions[i];
+                            items.push({
+                                type: "item",
+                                icon: act.icon || "play_arrow",
+                                text: act.name || "",
+                                action: () => {
+                                    root.closePopout();
+                                    SessionService.launchDesktopAction(entry, act);
+                                    AppUsageHistoryData.addAppUsage(entry);
+                                }
+                            });
+                        }
                     }
-                ]
+                    items.push({
+                        type: "separator"
+                    });
+                    if (SessionService.nvidiaCommand) {
+                        items.push({
+                            type: "item",
+                            icon: "memory",
+                            text: I18n.tr("Launch on dGPU"),
+                            action: () => {
+                                root.closePopout();
+                                SessionService.launchDesktopEntry(entry, true);
+                                AppUsageHistoryData.addAppUsage(entry);
+                            }
+                        });
+                    }
+                    items.push({
+                        type: "item",
+                        icon: "visibility_off",
+                        text: I18n.tr("Hide App"),
+                        action: () => SessionData.hideApp(entry.id)
+                    });
+                    return items;
+                }
                 onRenderActiveChanged: {
                     if (!renderActive)
                         Qt.callLater(() => searchField.forceActiveFocus());
@@ -409,18 +515,34 @@ PluginComponent {
                     else
                         appsFocused = items.length > 0;
                 } else if (key === Qt.Key_Down || key === Qt.Key_Up) {
-                    const step = key === Qt.Key_Down ? 1 : -1;
-                    if (appsActive)
+                    const dir = key === Qt.Key_Down ? 1 : -1;
+                    if (appsActive) {
+                        const step = isGrid ? dir * appGrid.columns : dir;
                         appIndex = Math.max(0, Math.min(items.length - 1, appIndex + step));
-                    else if (folders.length > 0)
-                        folderId = folders[Math.max(0, Math.min(folders.length - 1, folderIndex + step))].id;
+                    } else if (folders.length > 0) {
+                        folderId = folders[Math.max(0, Math.min(folders.length - 1, folderIndex + dir))].id;
+                    }
                 } else if (key === Qt.Key_Tab || key === Qt.Key_Backtab) {
                     if (!query)
                         appsFocused = !appsFocused && items.length > 0;
-                } else if (key === Qt.Key_Right && !appsActive) {
-                    appsFocused = items.length > 0;
-                } else if (key === Qt.Key_Left && appsFocused && !query) {
-                    appsFocused = false;
+                } else if (key === Qt.Key_Right) {
+                    if (!appsActive)
+                        appsFocused = items.length > 0;
+                    else if (isGrid && appIndex < items.length - 1)
+                        appIndex += 1;
+                    else {
+                        event.accepted = false;
+                        return;
+                    }
+                } else if (key === Qt.Key_Left && appsActive) {
+                    if (isGrid && appIndex % appGrid.columns > 0)
+                        appIndex -= 1;
+                    else if (!query)
+                        appsFocused = false;
+                    else {
+                        event.accepted = false;
+                        return;
+                    }
                 } else {
                     event.accepted = false;
                     return;
@@ -484,8 +606,8 @@ PluginComponent {
                     focusPolicy: Qt.NoFocus
                     isSelected: ListView.isCurrentItem && !panel.query
                     // Favorites form a group of their own above the menu folders.
-                    firstInGroup: index <= 1
-                    lastInGroup: index === 0 || index === ListView.view.count - 1
+                    firstInGroup: index === 0 || index === panel.pinnedFolders.length
+                    lastInGroup: index === panel.pinnedFolders.length - 1 || index === ListView.view.count - 1
                     onClicked: {
                         panel.showFolder(modelData.id);
                         panel.appsFocused = false;
@@ -526,7 +648,7 @@ PluginComponent {
                 anchors.right: parent.right
                 anchors.top: searchField.bottom
                 anchors.leftMargin: Theme.spacingM
-                anchors.rightMargin: panel.inset
+                anchors.rightMargin: panel.inset + viewModeButton.width + Theme.spacingXS
                 anchors.topMargin: LauncherMetrics.resultsGap
                 canChangeViewMode: false
                 canCollapse: false
@@ -540,15 +662,29 @@ PluginComponent {
                 }
             }
 
+            DActionButton {
+                id: viewModeButton
+                anchors.right: parent.right
+                anchors.rightMargin: panel.inset
+                anchors.verticalCenter: header.verticalCenter
+                focusPolicy: Qt.NoFocus
+                iconName: panel.isGrid ? "view_list" : "grid_view"
+                tooltipText: panel.isGrid ? I18n.tr("List", "noun, list view mode option") : I18n.tr("Grid", "noun, grid view mode and layout option")
+                buttonSize: LauncherMetrics.headerButtonSize
+                iconSize: Theme.iconSizeSmall
+                onClicked: root.saveViewMode(panel.isGrid ? "list" : "grid")
+            }
+
             DListView {
                 id: appList
                 anchors.left: header.left
-                anchors.right: header.right
+                anchors.right: parent.right
                 anchors.top: header.bottom
                 anchors.bottom: parent.bottom
                 anchors.topMargin: LauncherMetrics.resultsGap
+                anchors.rightMargin: panel.inset
                 anchors.bottomMargin: panel.inset
-                visible: !panel.inFavorites
+                visible: !panel.isGrid && !panel.inFavorites
                 clip: true
                 highlightSelection: panel.appsActive
                 currentIndex: panel.appIndex
@@ -575,7 +711,7 @@ PluginComponent {
             DFlickable {
                 id: favoritesView
                 anchors.fill: appList
-                visible: panel.inFavorites
+                visible: !panel.isGrid && panel.inFavorites
                 clip: true
                 contentHeight: favoritesList.height
 
@@ -637,6 +773,32 @@ PluginComponent {
                             }
                         }
                     }
+                }
+            }
+
+            GridView {
+                id: appGrid
+                readonly property int columns: Math.max(3, Math.floor(width / 120))
+
+                anchors.fill: appList
+                visible: panel.isGrid
+                clip: true
+                cellWidth: Math.floor(width / columns)
+                cellHeight: Math.max(104, LauncherMetrics.gridIconSize + Theme.fontSizeSmall * 2 + Theme.spacingM * 2)
+                currentIndex: panel.appIndex
+                model: panel.isGrid ? panel.items : []
+                boundsBehavior: Flickable.StopAtBounds
+
+                delegate: LauncherTile {
+                    required property var modelData
+                    required property int index
+
+                    width: appGrid.cellWidth
+                    height: appGrid.cellHeight
+                    item: modelData
+                    isSelected: GridView.isCurrentItem && panel.appsActive
+                    onClicked: panel.activate(modelData)
+                    onRightClicked: (x, y) => panel.showMenu(modelData, x, y)
                 }
             }
 
@@ -718,6 +880,12 @@ PluginComponent {
         if (!id.startsWith(builtInPrefix))
             return null;
         return AppSearchService.coreApps.find(app => builtInPrefix + app.builtInPluginId === id) ?? null;
+    }
+
+    function desktopEntryFor(id) {
+        if (!id || id.startsWith(builtInPrefix))
+            return null;
+        return AppSearchService.applications.find(app => app.id === id) ?? null;
     }
 
     function readFile(path) {
@@ -832,6 +1000,10 @@ PluginComponent {
 
     function saveFavorites(ids) {
         (pluginService ?? PluginService).savePluginData("xdgMenu", "favorites", ids);
+    }
+
+    function saveViewMode(mode) {
+        (pluginService ?? PluginService).savePluginData("xdgMenu", "viewMode", mode);
     }
 
     // Every bar instance has this handler; only the first registered one answers.
