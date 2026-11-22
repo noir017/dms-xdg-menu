@@ -8,11 +8,23 @@
   "Apps made only for another desktop are hidden unless it is listed here. Separate names with semicolons.": {
     "Apps made only for another desktop are hidden unless it is listed here. Separate names with semicolons.": "只给其它桌面用的应用默认隐藏，在这里列出该桌面即可显示，多个用分号分隔，如 KDE;GNOME。"
   },
+  "Confirm log out?": {
+    "Confirm log out?": "确认注销？"
+  },
+  "Confirm power off?": {
+    "Confirm power off?": "确认关机？"
+  },
+  "Confirm reboot?": {
+    "Confirm reboot?": "确认重启？"
+  },
   "Favorites": {
     "Favorites": "常用"
   },
   "Folder": {
     "Folder": "文件夹"
+  },
+  "Power": {
+    "Power": "电源"
   },
   "Remove from Favorites": {
     "Remove from Favorites": "从常用移除"
@@ -22,5 +34,14 @@
   },
   "Search results": {
     "Search results": "搜索结果"
+  },
+  "Show a power button next to the search field for screen off, lock, suspend, log out, reboot and power off.": {
+    "Show a power button next to the search field for screen off, lock, suspend, log out, reboot and power off.": "在搜索框右侧显示电源按钮，提供关屏、锁定、休眠、注销、重启和关机操作。"
+  },
+  "Show power button": {
+    "Show power button": "显示电源按钮"
+  },
+  "Turn off screen": {
+    "Turn off screen": "关屏"
   }
 }

@@ -12,4 +12,11 @@ PluginSettings {
         placeholder: "KDE;GNOME"
         defaultValue: ""
     }
+
+    ToggleSetting {
+        settingKey: "showPowerMenu"
+        label: I18n.trFor("xdgMenu", "Show power button")
+        description: I18n.trFor("xdgMenu", "Show a power button next to the search field for screen off, lock, suspend, log out, reboot and power off.")
+        defaultValue: true
+    }
 }

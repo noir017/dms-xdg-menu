@@ -37,6 +37,16 @@ PluginComponent {
     readonly property var favorites: pluginData.favorites ?? []
     // Desktops whose OnlyShowIn apps are shown too, from the settings page: "KDE;GNOME".
     readonly property var extraDesktops: String(pluginData.extraDesktops ?? "").split(/[;,:\s]+/).filter(name => name)
+    readonly property bool showPowerMenu: pluginData.showPowerMenu !== false
+    readonly property bool canPowerOffMonitors: CompositorService.isNiri
+        || CompositorService.isHyprland
+        || CompositorService.isMango
+        || CompositorService.isSway
+        || CompositorService.isScroll
+        || CompositorService.isMiracle
+        || CompositorService.isLabwc
+        || CompositorService.isUmbriel
+        || CompositorService.outputPowerAvailable
     // DMS's own apps (Settings, Notepad, ...) have no desktop file; they get ids of their own.
     readonly property string builtInPrefix: "dms:"
 
@@ -253,6 +263,48 @@ PluginComponent {
                 appMenu.open(popout.screen, popout.renderedAlignedX + pos.x + Theme.spacingXS, popout.renderedAlignedY + pos.y + Theme.spacingXS, false);
             }
 
+            function togglePowerMenu() {
+                if (powerMenu.renderActive) {
+                    powerMenu.hide();
+                    return;
+                }
+                const popout = parentPopout;
+                const body = popout?.contentLoader?.item;
+                if (!body)
+                    return;
+                powerMenu.pendingAction = "";
+                powerMenu.targetScreen = popout.screen;
+                const pos = body.mapFromItem(powerButton, powerButton.width, powerButton.height + Theme.spacingXS);
+                powerMenu.open(popout.screen, popout.renderedAlignedX + pos.x - powerMenu.effectiveMenuWidth, popout.renderedAlignedY + pos.y, false);
+            }
+
+            function triggerPowerAction(action) {
+                if (action === "screenOff") {
+                    root.closePopout();
+                    screenOffTimer.restart();
+                    return;
+                }
+                if (action === "lock") {
+                    root.closePopout();
+                    IdleService.lockRequested();
+                    return;
+                }
+                if (action === "suspend") {
+                    root.closePopout();
+                    SessionService.executePowerAction("suspend");
+                    return;
+                }
+                if (SettingsData.powerActionConfirm && powerMenu.pendingAction !== action) {
+                    powerMenu.pendingAction = action;
+                    powerConfirmTimer.restart();
+                    return;
+                }
+                powerMenu.pendingAction = "";
+                powerConfirmTimer.stop();
+                root.closePopout();
+                SessionService.executePowerAction(action);
+            }
+
             Controller {
                 id: launcher
             }
@@ -277,6 +329,73 @@ PluginComponent {
                 onRenderActiveChanged: {
                     if (!renderActive)
                         Qt.callLater(() => searchField.forceActiveFocus());
+                }
+            }
+
+            Timer {
+                id: powerConfirmTimer
+                interval: 4000
+                onTriggered: powerMenu.pendingAction = ""
+            }
+
+            Shell.DContextMenu {
+                id: powerMenu
+
+                property string pendingAction: ""
+
+                function confirmLabel(action) {
+                    switch (action) {
+                    case "logout":
+                        return I18n.trFor("xdgMenu", "Confirm log out?");
+                    case "reboot":
+                        return I18n.trFor("xdgMenu", "Confirm reboot?");
+                    case "poweroff":
+                        return I18n.trFor("xdgMenu", "Confirm power off?");
+                    default:
+                        return "";
+                    }
+                }
+
+                function powerItem(action, destructive) {
+                    const data = SessionService.getPowerActionData(action);
+                    const needsConfirm = destructive && SettingsData.powerActionConfirm;
+                    const confirming = needsConfirm && pendingAction === action;
+                    return {
+                        type: "item",
+                        icon: data.icon,
+                        text: confirming ? confirmLabel(action) : data.label,
+                        isDestructive: confirming || action === "poweroff",
+                        keepOpen: needsConfirm && !confirming,
+                        action: () => panel.triggerPowerAction(action)
+                    };
+                }
+
+                layerNamespace: "dms:plugins:xdgMenu:power-menu"
+                keyboardNavigable: true
+                transientSurfaceTracker: panel.parentPopout?.transientSurfaceTracker ?? null
+                menuItems: [
+                    {
+                        type: "item",
+                        icon: "desktop_access_disabled",
+                        text: I18n.trFor("xdgMenu", "Turn off screen"),
+                        hidden: !root.canPowerOffMonitors,
+                        action: () => panel.triggerPowerAction("screenOff")
+                    },
+                    powerItem("lock", false),
+                    powerItem("suspend", false),
+                    {
+                        type: "separator"
+                    },
+                    powerItem("logout", true),
+                    powerItem("reboot", true),
+                    powerItem("poweroff", true)
+                ]
+                onRenderActiveChanged: {
+                    if (!renderActive) {
+                        pendingAction = "";
+                        powerConfirmTimer.stop();
+                        Qt.callLater(() => searchField.forceActiveFocus());
+                    }
                 }
             }
 
@@ -313,9 +432,29 @@ PluginComponent {
                 id: searchField
                 x: panel.inset
                 y: panel.inset
-                width: parent.width - panel.inset * 2
+                width: parent.width - panel.inset * 2 - (root.showPowerMenu ? powerButton.width + Theme.spacingS : 0)
                 placeholderText: I18n.tr("Search", "search field placeholder") + "…"
                 keyForwardTargets: [panel]
+            }
+
+            DIconButton {
+                id: powerButton
+                visible: root.showPowerMenu
+                anchors.right: parent.right
+                anchors.rightMargin: panel.inset
+                anchors.verticalCenter: searchField.verticalCenter
+                variant: "outlined"
+                round: false
+                buttonSize: searchField.height
+                width: searchField.height
+                radius: searchField.cornerRadius
+                iconName: "power_settings_new"
+                iconSize: Theme.iconSize
+                tooltipText: I18n.trFor("xdgMenu", "Power")
+                checkable: true
+                checked: powerMenu.renderActive
+                focusPolicy: Qt.NoFocus
+                onClicked: panel.togglePowerMenu()
             }
 
             DListView {
@@ -654,6 +793,13 @@ PluginComponent {
         id: rebuildTimer
         interval: 100
         onTriggered: root.rebuildMenu()
+    }
+
+    // Delay monitor power-off slightly so releasing the mouse button or closing the popout does not wake the display.
+    Timer {
+        id: screenOffTimer
+        interval: 400
+        onTriggered: CompositorService.powerOffMonitors()
     }
 
     FileView {
